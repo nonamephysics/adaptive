@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 
+from collections import Mapping
 from math import sqrt
 import sys
 
 import numpy as np
+import scipy.stats
 
 from .learner1D import Learner1D
 
@@ -14,28 +16,15 @@ inf = sys.float_info.max
 class AverageMixin:
     @property
     def data(self):
-        return {k: sum(v.values()) / len(v) for k, v in self._data.items()}
+        return {k: v.mean for k, v in self._data.items()}
 
     @property
     def data_sem(self):
-        return {k: self.standard_error(v.values())
+        return {k: v.standard_error if v.n >= self.min_values_per_point else inf
             for k, v in self._data.items()}
 
-    def standard_error(self, lst):
-        n = len(lst)
-        if n < self.min_values_per_point:
-            return inf
-        sum_f_sq = sum(x**2 for x in lst)
-        mean = sum(x for x in lst) / n
-        numerator = sum_f_sq - n * mean**2
-        if numerator < 0:
-            # This means that the numerator is ~ -1e-15
-            return 0
-        std = sqrt(numerator / (n - 1))
-        return std / sqrt(n)
-
     def mean_values_per_point(self):
-        return np.mean([len(x.values()) for x in self._data.values()])
+        return np.mean([x.n for x in self._data.values()])
 
     def get_seed(self, point):
         _data = self._data.get(point, {})
@@ -77,7 +66,7 @@ class AverageMixin:
     def _add_to_data(self, point, value):
         x, seed = self.unpack_point(point)
         if x not in self._data:
-            self._data[x] = {}
+            self._data[x] = DataPoint()
         self._data[x][seed] = value
 
     def ask(self, n, tell_pending=True):
@@ -142,7 +131,7 @@ class AverageMixin:
 
 
 def add_average_mixin(cls):
-    names = ('data', 'data_sem', 'standard_error', 'mean_values_per_point',
+    names = ('data', 'data_sem', 'mean_values_per_point',
              'get_seed', 'loss_per_existing_point', '_add_to_pending',
              '_remove_from_to_pending', '_add_to_data', 'ask', 'n_values',
              '_normalize_new_points_loss_improvements',
@@ -153,3 +142,70 @@ def add_average_mixin(cls):
         setattr(cls, name, getattr(AverageMixin, name))
 
     return cls
+
+
+class DataPoint(dict):
+    """A dict-like data structure that keeps track of the
+    length, sum, and sum of squares of the values.
+
+    It has properties to calculate the mean, sample
+    standard deviation, and standard error."""
+    def __init__(self, *args, **kwargs):
+        self.sum = 0
+        self.sum_sq = 0
+        self.n = 0
+        self.update(*args, **kwargs)
+
+    def __setitem__(self, key, val):
+        self._remove(key)
+        self.sum += val
+        self.sum_sq += val**2
+        self.n += 1
+        super().__setitem__(key, val)
+
+    def _remove(self, key):
+        if key in self:
+            val = self[key]
+            self.sum -= val
+            self.sum_sq -= val**2
+            self.n -= 1
+
+    @property
+    def mean(self):
+        return self.sum / self.n
+
+    @property
+    def std(self):
+        if self.n < 2:
+            return np.nan
+        numerator = self.sum_sq - self.n * self.mean**2
+        if numerator < 0:
+            # This means that the numerator is ~ -1e-15
+            return 0
+        return sqrt(numerator / (self.n - 1))
+
+    @property
+    def standard_error(self):
+        if self.n < 2:
+            return np.inf
+        return self.std / sqrt(self.n)
+
+    def __delitem__(self, key):
+        self._remove(key)
+        super().__delitem__(key)
+
+    def pop(self, *args):
+        self._remove(args[0])
+        return super().pop(*args)
+
+    def update(self, other=None, **kwargs):
+        iterator = other if isinstance(other, Mapping) else kwargs
+        for k, v in iterator.items():
+            self[k] = v
+
+    def assert_consistent_data_structure(self):
+        vals = list(self.values())
+        np.testing.assert_almost_equal(np.mean(vals), self.mean)
+        np.testing.assert_almost_equal(np.std(vals, ddof=1), self.std)
+        np.testing.assert_almost_equal(self.standard_error, scipy.stats.sem(vals))
+        assert self.n == len(vals)
