@@ -27,7 +27,7 @@ class AverageLearner2D(Learner2D):
         weight : float, int, default 1
             When `weight > 1` adding more points to existing points will be
             prioritized (making the standard error of a point more imporant,)
-            otherwise adding new triangles will be prioritized (making the 
+            otherwise adding new triangles will be prioritized (making the
             loss of a triangle more important.)
 
         Attributes
