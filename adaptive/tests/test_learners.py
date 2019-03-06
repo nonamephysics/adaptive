@@ -475,6 +475,7 @@ def test_balancing_learner(learner_type, f, learner_kwargs):
 
 
 @run_with(Learner1D, Learner2D, LearnerND, AverageLearner,
+    AverageLearner1D, AverageLearner2D,
     maybe_skip(SKOptLearner), IntegratorLearner,
     with_all_loss_functions=False)
 def test_saving(learner_type, f, learner_kwargs):
@@ -484,6 +485,9 @@ def test_saving(learner_type, f, learner_kwargs):
     if learner_type is Learner1D:
         learner._recompute_losses_factor = 1
         control._recompute_losses_factor = 1
+    elif learner_type in (AverageLearner1D, AverageLearner2D):
+        learner.weight = 0.1
+        control.weight = 0.1
     simple(learner, lambda l: l.npoints > 100)
     fd, path = tempfile.mkstemp()
     try:
