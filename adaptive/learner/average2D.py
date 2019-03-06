@@ -6,48 +6,48 @@ from itertools import permutations
 import numpy as np
 
 from adaptive.learner.learner2D import Learner2D
-from adaptive.learner.average_mixin import add_average_mixin
+from adaptive.learner.average_mixin import add_average_mixin, DataPoint
 
 
 @add_average_mixin
 class AverageLearner2D(Learner2D):
+    """Same as 'Learner2D', only the differences are in the doc-string.
+
+    Parameters
+    ----------
+    function : callable
+        The function to learn. Must take a tuple of a tuple of two real
+        parameters and a seed and return a real number.
+        So ((x, y), seed) → float, e.g.:
+        >>> def f(xy_seed):
+        ...     (x, y), seed = xy_seed
+        ...     random.seed(xy_seed)
+        ...     return x * y + random.uniform(-0.5, 0.5)
+    weight : float, int, default 1
+        When `weight > 1` adding more points to existing points will be
+        prioritized (making the standard error of a point more imporant,)
+        otherwise adding new triangles will be prioritized (making the
+        loss of a triangle more important.)
+
+    Attributes
+    ----------
+    min_values_per_point : int, default 3
+        Minimum amount of values per point. This means that the
+        standard error of a point is infinity until there are
+        'min_values_per_point' for a point.
+
+    Methods
+    -------
+    mean_values_per_point : callable
+        Returns the average numbers of values per (x, y) value.
+
+    Notes
+    -----
+    The total loss of the learner is still only determined by the
+    max loss of the triangles.
+    """
+
     def __init__(self, function, bounds, weight=1, loss_per_triangle=None):
-        """Same as 'Learner2D', only the differences are in the doc-string.
-
-        Parameters
-        ----------
-        function : callable
-            The function to learn. Must take a tuple of a tuple of two real
-            parameters and a seed and return a real number.
-            So ((x, y), seed) → float, e.g.:
-            >>> def f(xy_seed):
-            ...     (x, y), seed = xy_seed
-            ...     random.seed(xy_seed)
-            ...     return x * y + random.uniform(-0.5, 0.5)
-        weight : float, int, default 1
-            When `weight > 1` adding more points to existing points will be
-            prioritized (making the standard error of a point more imporant,)
-            otherwise adding new triangles will be prioritized (making the
-            loss of a triangle more important.)
-
-        Attributes
-        ----------
-        min_values_per_point : int, default 3
-            Minimum amount of values per point. This means that the
-            standard error of a point is infinity until there are
-            'min_values_per_point' for a point.
-
-        Methods
-        -------
-        mean_values_per_point : callable
-            Returns the average numbers of values per (x, y) value.
-
-        Notes
-        -----
-        The total loss of the learner is still only determined by the
-        max loss of the triangles.
-        """
-
         super().__init__(function, bounds, loss_per_triangle)
         self._data = dict()  # {point: {seed: value}} mapping
         self.pending_points = dict()  # {point: {seed}}
