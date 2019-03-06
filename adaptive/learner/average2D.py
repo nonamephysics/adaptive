@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections import OrderedDict, defaultdict
+from copy import copy
 from itertools import permutations
 
 import numpy as np
@@ -146,3 +147,11 @@ class AverageLearner2D(Learner2D):
         if not point_exists:
             self._ip = None
         self._stack.pop(point, None)
+
+    def _set_data(self, data):
+        # change dict -> DataPoint, because the points are saved using dicts
+        self._data = {k: DataPoint(v) for k, v in data.items()}
+        # Remove points from stack if they already exist
+        for point, seed in copy(self._stack):
+            if seed in self._data.get(point, set()):
+                self._stack.pop((point, seed))
