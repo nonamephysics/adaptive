@@ -7,7 +7,7 @@ import numpy as np
 
 from adaptive.notebook_integration import ensure_holoviews
 from adaptive.learner.learner1D import Learner1D
-from adaptive.learner.average_mixin import add_average_mixin
+from adaptive.learner.average_mixin import add_average_mixin, DataPoint
 
 
 @add_average_mixin
@@ -65,7 +65,8 @@ class AverageLearner1D(Learner1D):
     def tell_many(self, xs, ys):
         # `super().tell_many(xs, ys)` will not work.
         for x, y in zip(xs, ys):
-            self.tell(x, y)
+            for seed, value in y.items():
+                self.tell((x, seed), value)
 
     def remove_unfinished(self):
         self.pending_points = {}
@@ -87,3 +88,8 @@ class AverageLearner1D(Learner1D):
             return scatter * spread
         else:
             return scatter
+
+    def _set_data(self, data):
+        # change dict -> DataPoint, because the points are saved using dicts
+        data = {k: DataPoint(v) for k, v in data.items()}
+        self.tell_many(data.keys(), data.values())

@@ -129,6 +129,10 @@ class AverageMixin:
         return [inf if needs_more_data(p) else loss
             for (p, seed), loss in zip(points, loss_improvements)]
 
+    def _get_data(self):
+        # change DataPoint -> dict for saving
+        return {k: dict(v) for k, v in self._data.items()}
+
 
 def add_average_mixin(cls):
     names = ('data', 'data_sem', 'mean_values_per_point',
@@ -136,7 +140,8 @@ def add_average_mixin(cls):
              '_remove_from_to_pending', '_add_to_data', 'ask', 'n_values',
              '_normalize_new_points_loss_improvements',
              '_normalize_existing_points_loss_improvements',
-             '_mean_values_per_neighbor')
+             '_mean_values_per_neighbor',
+             '_get_data')
 
     for name in names:
         setattr(cls, name, getattr(AverageMixin, name))
