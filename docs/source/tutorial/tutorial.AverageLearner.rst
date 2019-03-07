@@ -74,7 +74,7 @@ So, the ``learner`` compares the loss of __potential new intervals (or triangles
 
 The relative importance of both can be adjusted by a hyperparameter ``learner.weight``, see the doc-string for more information.
 
-Let's again try to learn some functions but now with uniformly distributed noise. We start with 1D and then go to 2D.
+Let's again try to learn some functions but now with [heteroscedastic](https://en.wikipedia.org/wiki/Heteroscedasticity) noise. We start with 1D and then go to 2D.
 
 `~adaptive.AverageLearner1D`
 ............................
@@ -119,13 +119,13 @@ Let's again try to learn some functions but now with uniformly distributed noise
 
     def noisy_ring(xy_seed):
         import numpy as np
-        import random
+        from random import uniform
         (x, y), seed = xy_seed
-        random.seed(xy_seed)  # to make the random function deterministic
         a = 0.2
-        ring = x + np.exp(-(x**2 + y**2 - 0.75**2)**2/a**4)
-        noise = random.uniform(-0.5, 0.5)
-        return ring + noise
+        z = (x**2 + y**2 - 0.75**2) / a**2
+        plateau = np.arctan(z)
+        noise = uniform(-10, 10) * np.exp(-z**2)
+        return plateau + noise
 
     learner = adaptive.AverageLearner2D(noisy_ring, bounds=[(-1, 1), (-1, 1)])
     runner = adaptive.Runner(learner, goal=lambda l: l.loss() < 0.01)
