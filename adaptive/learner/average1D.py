@@ -19,6 +19,7 @@ class AverageLearner1D(Learner1D):
 
         self.weight = weight
         self.min_values_per_point = 3
+        self._seed_stack = []  # [(point, seed), ...]
 
     def value_scale(self):
         return self._scale[1] or 1
