@@ -47,6 +47,8 @@ class AverageMixin:
             sem_improvement = (1 - sqrt(N - 1) / sqrt(N)) * sem
             loss_improvement = self.weight * sem_improvement / scale
             loss_improvements.append(loss_improvement)
+        loss_improvements = self._normalize_existing_points_loss_improvements(
+            points, loss_improvements)
         return points, loss_improvements
 
     def _add_to_pending(self, point):
@@ -71,26 +73,44 @@ class AverageMixin:
 
     def ask(self, n, tell_pending=True):
         """Return n points that are expected to maximally reduce the loss."""
-        points, loss_improvements = self._ask_points_without_adding(n)
-        loss_improvements = self._normalize_new_points_loss_improvements(
-            points, loss_improvements)
+        points, loss_improvements = [], []
+        self._fill_seed_stack(till=n)
 
-        p, l = self.loss_per_existing_point()
-        l = self._normalize_existing_points_loss_improvements(p, l)
-        points += p
-        loss_improvements += l
+        # Take from the _seed_stack if there are any points.
+        for i in range(n):
+            point, loss_improvement = self._seed_stack[i]
+            points.append(point)
+            loss_improvements.append(loss_improvement)
+
+        if tell_pending:
+            for p in points:
+                self.tell_pending(p)
+            self._seed_stack = self._seed_stack[n:]
+
+        return points, loss_improvements
+
+    def _fill_seed_stack(self, till):
+        n = till - len(self._seed_stack)
+        if n < 1:
+            return
+        points, loss_improvements = [], []
+        new_points, new_points_loss_improvements = (
+            self._ask_points_without_adding(n))
+        loss_improvements += self._normalize_new_points_loss_improvements(
+            new_points, new_points_loss_improvements)
+        points += new_points
+
+        existing_points, existing_points_loss_improvements = \
+            self.loss_per_existing_point()
+        points += existing_points
+        loss_improvements += existing_points_loss_improvements
 
         loss_improvements, points = zip(*sorted(
             zip(loss_improvements, points), reverse=True))
 
         points = list(points)[:n]
         loss_improvements = list(loss_improvements)[:n]
-
-        if tell_pending:
-            for p in points:
-                self.tell_pending(p)
-
-        return points, loss_improvements
+        self._seed_stack += list(zip(points, loss_improvements))
 
     def n_values(self, point):
         pending_points = self.pending_points.get(point, [])
@@ -148,7 +168,7 @@ def add_average_mixin(cls):
              '_normalize_new_points_loss_improvements',
              '_normalize_existing_points_loss_improvements',
              '_mean_values_per_neighbor',
-             '_get_data')
+             '_get_data', '_fill_seed_stack')
 
     for name in names:
         setattr(cls, name, getattr(AverageMixin, name))

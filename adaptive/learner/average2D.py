@@ -59,6 +59,8 @@ class AverageLearner2D(Learner2D):
         self.weight = weight
         self.min_values_per_point = 3
 
+        self._seed_stack = []  # [(point, seed), ...]
+
     def unpack_point(self, point):
         return tuple(point[0]), point[1]
 
