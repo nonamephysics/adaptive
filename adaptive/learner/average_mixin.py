@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import scipy.stats
 
-from .learner1D import Learner1D
+from adaptive.learner.learner1D import Learner1D
 
 
 inf = sys.float_info.max
@@ -26,30 +26,17 @@ class AverageMixin:
     def mean_values_per_point(self):
         return np.mean([x.n for x in self._data.values()])
 
-    def _next_seed(self, point):
-        _data = self._data.get(point, {})
+    def _next_seed(self, point, exclude=None):
+        exclude = set(exclude) if exclude is not None else set()
+        done_seeds = self._data.get(point, {}).keys()
         pending_seeds = self.pending_points.get(point, set())
-        seed = len(_data) + len(pending_seeds)
-        if seed in _data or seed in pending_seeds:
+        seed = len(done_seeds) + len(pending_seeds) + len(exclude)
+        if any(seed in x for x in [done_seeds, pending_seeds, exclude]):
             # Means that the seed already exists, for example
-            # when '_data[point].keys() | pending_points[point] == {0, 2}'.
+            # when 'done_seeds[point] | pending_seeds [point] == {0, 2}'.
             # Only happens when starting the learner after cancelling/loading.
-            return (set(range(seed)) - pending_seeds - _data.keys()).pop()
+            return (set(range(seed)) - pending_seeds - done_seeds - exclude).pop()
         return seed
-
-    def loss_per_existing_point(self):
-        scale = self.value_scale()
-        points = []
-        loss_improvements = []
-        for p, sem in self.data_sem.items():
-            points.append((p, self._next_seed(p)))
-            N = self.n_values(p)
-            sem_improvement = (1 - sqrt(N - 1) / sqrt(N)) * sem
-            loss_improvement = self.weight * sem_improvement / scale
-            loss_improvements.append(loss_improvement)
-        loss_improvements = self._normalize_existing_points_loss_improvements(
-            points, loss_improvements)
-        return points, loss_improvements
 
     def _add_to_pending(self, point):
         x, seed = self.unpack_point(point)
@@ -74,43 +61,78 @@ class AverageMixin:
     def ask(self, n, tell_pending=True):
         """Return n points that are expected to maximally reduce the loss."""
         points, loss_improvements = [], []
+
+        # Take from the _seed_stack.
         self._fill_seed_stack(till=n)
-
-        # Take from the _seed_stack if there are any points.
         for i in range(n):
-            point, loss_improvement = self._seed_stack[i]
-            points.append(point)
-            loss_improvements.append(loss_improvement)
+            exclude_seeds = set()
+            point, nseeds, loss_improvement = self._seed_stack[i]
+            for j in range(nseeds):
+                seed = self._next_seed(point, exclude_seeds)
+                exclude_seeds.add(seed)
+                points.append((point, seed))
+                loss_improvements.append(loss_improvement / nseeds)
+                if len(points) == n:
+                    break
+            if len(points) == n:
+                break
 
+        # Remove the chosen points from the _seed_stack.
         if tell_pending:
             for p in points:
                 self.tell_pending(p)
-            self._seed_stack = self._seed_stack[n:]
+            nseeds_left = nseeds - j - 1  # of self._seed_stack[i]
+            if nseeds_left > 0:  # not all seeds have been asked
+                point, nseeds, loss_improvement = self._seed_stack[i]
+                self._seed_stack[i] = (
+                    point, nseeds_left,
+                    loss_improvement * nseeds_left / nseeds
+                )
+                self._seed_stack = self._seed_stack[i:]
+            else:
+                self._seed_stack = self._seed_stack[i+1:]
 
         return points, loss_improvements
 
     def _fill_seed_stack(self, till):
-        n = till - len(self._seed_stack)
+        n = till - sum(nseeds for (_, nseeds, _) in self._seed_stack)
         if n < 1:
             return
         points, loss_improvements = [], []
-        new_points, new_points_loss_improvements = (
-            self._ask_points_without_adding(n))
-        loss_improvements += self._normalize_new_points_loss_improvements(
-            new_points, new_points_loss_improvements)
+
+        new_points, new_points_loss_improvements = \
+            self._new_points(n)
+
+        loss_improvements += new_points_loss_improvements
         points += new_points
 
         existing_points, existing_points_loss_improvements = \
-            self.loss_per_existing_point()
+            self._existing_points()
+
         points += existing_points
         loss_improvements += existing_points_loss_improvements
 
         loss_improvements, points = zip(*sorted(
             zip(loss_improvements, points), reverse=True))
 
-        points = list(points)[:n]
-        loss_improvements = list(loss_improvements)[:n]
-        self._seed_stack += list(zip(points, loss_improvements))
+        # A mapping to check if a point already exists in the _seed_stack
+        mapping = {point: i for i, (point, *_) in enumerate(self._seed_stack)}
+
+        # Add points to the _seed_stack.
+        n_left = n
+        for loss_improvement, (point, nseeds) in zip(
+            loss_improvements, points):
+            tup = (point, nseeds, loss_improvement)
+            if point in mapping:
+                i = mapping[point]
+                tup_old = self._seed_stack[i]
+                sum_ = [sum(x) for x in zip(tup[1:], tup_old[1:])]
+                self._seed_stack[i] = (point, *sum_)
+            else:
+                self._seed_stack.append(tup)
+            n_left -= nseeds
+            if n_left <= 0:
+                break
 
     def n_values(self, point):
         pending_points = self.pending_points.get(point, [])
@@ -121,40 +143,55 @@ class AverageMixin:
         return {p: sum(self.n_values(n) for n in ns) / len(ns)
             for p, ns in neighbors.items()}
 
-    def _normalize_new_points_loss_improvements(self, points, loss_improvements):
-        """If we are suggesting a new (not yet suggested) point, then its
-        'loss_improvement' should be divided by the average number of values
-        of its neigbors.
-
-        This is because it will take a similar amount of points to reach
-        that loss. """
+    def _new_points(self, n):
+        """Add new points with at least self.min_values_per_point points
+        or with as many points as the neighbors have on average."""
+        points, loss_improvements = self._ask_points_without_adding(n)
         if len(self._data) < 4:
-            return loss_improvements
+            points = [(p, self.min_values_per_point) for p, s in points]
+            return points, loss_improvements
 
-        only_points = [p for p, s in points]
+        only_points = [p for p, s in points]  # points are [(x, seed), ...]
         neighbors = self._get_neighbor_mapping_new_points(only_points)
         mean_values_per_neighbor = self._mean_values_per_neighbor(neighbors)
 
-        return [loss / mean_values_per_neighbor[p]
-            for (p, seed), loss in zip(points, loss_improvements)]
+        points = []
+        for p in only_points:
+            n_neighbors = int(mean_values_per_neighbor[p])
+            nseeds = max(n_neighbors, self.min_values_per_point)
+            points.append((p, nseeds))
 
-    def _normalize_existing_points_loss_improvements(self, points, loss_improvements):
-        """If the neighbors of 'point' have twice as much values
-        on average, then that 'point' should have an infinite loss.
+        return points, loss_improvements
 
-        We do this because this point probably has a incorrect
-        estimate of the sem."""
-        if len(self._data) < 4:
-            return loss_improvements
+    def _existing_points(self):
+        """Increase the number of seeds by 10%."""
+        if len(self.data) < 4:
+            return [], []
+        scale = self.value_scale()
+        points = []
+        loss_improvements = []
 
         neighbors = self._get_neighbor_mapping_existing_points()
         mean_values_per_neighbor = self._mean_values_per_neighbor(neighbors)
 
-        def needs_more_data(p):
-            return mean_values_per_neighbor[p] > 1.5 * self.n_values(p)
-
-        return [inf if needs_more_data(p) else loss
-            for (p, seed), loss in zip(points, loss_improvements)]
+        for p, sem in self.data_sem.items():
+            n_neighbors = mean_values_per_neighbor[p]
+            N = self.n_values(p)
+            n_more = int(0.1 * N)  # increase the amount of points by 10%
+            n_more = max(n_more, 1)  # at least 1 point
+            points.append((p, n_more))
+            needs_more_data = n_neighbors > 1.5 * N
+            if needs_more_data:
+                loss_improvement = inf
+            else:
+                # This is the improvement considering we will add
+                # n_more seeds to the stack.
+                sem_improvement = (1 - sqrt(N) / sqrt(N + n_more)) * sem
+                # We scale the values, sem(ys) / scale == sem(ys / scale).
+                # and multiply them by a weight.
+                loss_improvement = self.weight * sem_improvement / scale
+            loss_improvements.append(loss_improvement)
+        return points, loss_improvements
 
     def _get_data(self):
         # change DataPoint -> dict for saving
@@ -162,17 +199,11 @@ class AverageMixin:
 
 
 def add_average_mixin(cls):
-    names = ('data', 'data_sem', 'mean_values_per_point',
-             '_next_seed', 'loss_per_existing_point', '_add_to_pending',
-             '_remove_from_to_pending', '_add_to_data', 'ask', 'n_values',
-             '_normalize_new_points_loss_improvements',
-             '_normalize_existing_points_loss_improvements',
-             '_mean_values_per_neighbor',
-             '_get_data', '_fill_seed_stack')
-
-    for name in names:
-        setattr(cls, name, getattr(AverageMixin, name))
-
+    for name in AverageMixin.__dict__.keys():
+        if not name.startswith('__') and not name.endswith('__'):
+            # We assume that we don't implement or overwrite
+            # dunder / magic methods inside AverageMixin.
+            setattr(cls, name, getattr(AverageMixin, name))
     return cls
 
 
