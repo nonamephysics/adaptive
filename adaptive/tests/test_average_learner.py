@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
 
+from collections import defaultdict
 import random
 
 import numpy as np
 
-from adaptive.learner import AverageLearner
+from adaptive.learner import (
+    AverageLearner,
+    AverageLearner1D,
+    AverageLearner2D
+)
 
 
 def test_only_returns_new_points():
@@ -45,3 +50,15 @@ def test_avg_std_and_npoints():
             std = np.sqrt(sum((values - values.mean())**2) / (len(values) - 1))
             assert learner.npoints == len(learner.data)
             assert abs(learner.std - std) < 1e-13
+
+
+def test_2d_return_bounds():
+    learner = AverageLearner2D(lambda x: x[0], bounds=[(-1, 1), (-1, 1)])
+    learner.min_values_per_point = 10
+    nbounds = 4  # a Learner2D has 4 bounds
+    points, _ = learner.ask(nbounds * learner.min_values_per_point)
+    ps = defaultdict(list)
+    for x, seed in points:
+        ps[x].append(seed)
+    assert all(p in learner._bounds_points for p in ps.keys())
+    all(len(seeds) == learner.min_values_per_point for seeds in ps.values())
