@@ -119,23 +119,18 @@ class AverageLearner2D(Learner2D):
         Parameters
         ----------
         which : str
-            'n' or 'std'.
+            'n', 'std', 'mean', or 'standard_error'
 
         Returns
         -------
         plot : hv.Image
             Plot of the 'number of points' or 'std' per point.
         """
-        assert which in ('n', 'std')
+        assert which in ('n', 'std', 'standard_error', 'mean')
         tmp_learner = Learner2D(lambda _: _, bounds=self.bounds)
 
-        if which == 'n':
-            f = len
-        else:
-            f = lambda x: np.std(list(x.values()))
-
-        tmp_learner._data = {k: f(v) for k, v in self._data.items()}
-        return tmp_learner.plot()
+        tmp_learner._data = {k: getattr(v, which) for k, v in self._data.items()}
+        return tmp_learner.plot().relabel(which)
 
     def tell(self, point, value):
         point = tuple(point)
