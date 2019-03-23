@@ -431,7 +431,8 @@ class Learner2D(BaseLearner):
         self._ip_combined = None
         self._stack.pop(point, None)
 
-    def modify_point(self, point):
+    def _ensure_point(self, point):
+        """This adds a seed in the AverageLearner2D."""
         return point
 
     def _fill_stack(self, stack_till=1):
@@ -457,7 +458,7 @@ class Learner2D(BaseLearner):
             point_new = (clip(point_new[0], *self.bounds[0]),
                          clip(point_new[1], *self.bounds[1]))
 
-            point_new = self.modify_point(point_new)
+            point_new = self._ensure_point(point_new)
             loss_new = losses[jsimplex]
 
             points_new.append(point_new)

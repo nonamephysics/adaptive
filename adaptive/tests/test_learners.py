@@ -486,8 +486,8 @@ def test_saving(learner_type, f, learner_kwargs):
         learner._recompute_losses_factor = 1
         control._recompute_losses_factor = 1
     elif learner_type in (AverageLearner1D, AverageLearner2D):
-        learner.weight = 0.1
-        control.weight = 0.1
+        learner.average_priority = 0.1
+        control.average_priority = 0.1
     simple(learner, lambda l: l.npoints > 100)
     fd, path = tempfile.mkstemp()
     try:

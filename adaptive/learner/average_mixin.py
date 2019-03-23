@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from collections import Mapping
+from collections.abc import Mapping
 from math import sqrt
 import sys
 
@@ -14,6 +14,12 @@ inf = sys.float_info.max
 
 
 class AverageMixin:
+    """The methods from this class are used in the
+    `AverageLearner1D` and `AverageLearner2D.
+
+    This cannot be used as a mixin class because of method resolution
+    order problems. Instead use the `add_average_mixin` class decorator."""
+
     @property
     def data(self):
         return {k: v.mean for k, v in self._data.items()}
@@ -98,19 +104,12 @@ class AverageMixin:
         n = till - sum(nseeds for (_, nseeds, _) in self._seed_stack)
         if n < 1:
             return
-        points, loss_improvements = [], []
 
-        new_points, new_points_loss_improvements = \
-            self._new_points(n)
+        new_points, new_points_losses = self._new_points(n)
+        existing_points, existing_points_losses = self._existing_points()
 
-        loss_improvements += new_points_loss_improvements
-        points += new_points
-
-        existing_points, existing_points_loss_improvements = \
-            self._existing_points()
-
-        points += existing_points
-        loss_improvements += existing_points_loss_improvements
+        points = new_points + existing_points
+        loss_improvements = new_points_losses + existing_points_losses
 
         loss_improvements, points = zip(*sorted(
             zip(loss_improvements, points), reverse=True))
@@ -118,12 +117,16 @@ class AverageMixin:
         # A mapping to check if a point already exists in the _seed_stack
         mapping = {point: i for i, (point, *_) in enumerate(self._seed_stack)}
 
-        # Add points to the _seed_stack.
+        # Add points to the _seed_stack, it can happen that its
+        # length exceeds the number of requested points.
         n_left = n
         for loss_improvement, (point, nseeds) in zip(
             loss_improvements, points):
             tup = (point, nseeds, loss_improvement)
-            if point in mapping:
+            if point in mapping:  # point is inside _seed_stack
+                # Combine the tuple with the same points existing in the
+                # _seed_stack with the newly suggested
+                # (nseeds, loss_improvements) pair.
                 i = mapping[point]
                 tup_old = self._seed_stack[i]
                 sum_ = [sum(x) for x in zip(tup[1:], tup_old[1:])]
@@ -135,6 +138,7 @@ class AverageMixin:
                 break
 
     def n_values(self, point):
+        """The total number of seeds (done or requested) at a point."""
         pending_points = self.pending_points.get(point, [])
         return len(self._data[point]) + len(pending_points)
 
@@ -163,7 +167,7 @@ class AverageMixin:
 
         return points, loss_improvements
 
-    def _existing_points(self):
+    def _existing_points(self, fraction=0.1):
         """Increase the number of seeds by 10%."""
         if len(self.data) < 4:
             return [], []
@@ -175,12 +179,11 @@ class AverageMixin:
         mean_values_per_neighbor = self._mean_values_per_neighbor(neighbors)
 
         for p, sem in self.data_sem.items():
-            n_neighbors = mean_values_per_neighbor[p]
             N = self.n_values(p)
-            n_more = int(0.1 * N)  # increase the amount of points by 10%
+            n_more = int(fraction * N)  # increase the amount of points by 10%
             n_more = max(n_more, 1)  # at least 1 point
             points.append((p, n_more))
-            needs_more_data = n_neighbors > 1.5 * N
+            needs_more_data = mean_values_per_neighbor[p] > 1.5 * N
             if needs_more_data:
                 loss_improvement = inf
             else:
@@ -188,8 +191,8 @@ class AverageMixin:
                 # n_more seeds to the stack.
                 sem_improvement = (1 - sqrt(N) / sqrt(N + n_more)) * sem
                 # We scale the values, sem(ys) / scale == sem(ys / scale).
-                # and multiply them by a weight.
-                loss_improvement = self.weight * sem_improvement / scale
+                # and multiply them by a weight average_priority.
+                loss_improvement = self.average_priority * sem_improvement / scale
             loss_improvements.append(loss_improvement)
         return points, loss_improvements
 
@@ -240,10 +243,13 @@ class DataPoint(dict):
     @property
     def std(self):
         if self.n < 2:
+            # The sample standard deviation is not defined for
+            # less than 2 values.
             return np.nan
         numerator = self.sum_sq - self.n * self.mean**2
         if numerator < 0:
             # This means that the numerator is ~ -1e-15
+            # so nummerically it's 0.
             return 0
         return sqrt(numerator / (self.n - 1))
 

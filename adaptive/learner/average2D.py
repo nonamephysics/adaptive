@@ -24,11 +24,11 @@ class AverageLearner2D(Learner2D):
         ...     (x, y), seed = xy_seed
         ...     random.seed(xy_seed)
         ...     return x * y + random.uniform(-0.5, 0.5)
-    weight : float, int, default 1
-        When `weight > 1` adding more points to existing points will be
-        prioritized (making the standard error of a point more imporant,)
-        otherwise adding new triangles will be prioritized (making the
-        loss of a triangle more important.)
+    average_priority : float, int, default 1
+        When `average_priority > 1` adding more points to existing points
+        will be prioritized (making the standard error of a point more
+        imporant,) otherwise adding new triangles will be prioritized
+        (making the loss of a triangle more important.)
 
     Attributes
     ----------
@@ -48,7 +48,7 @@ class AverageLearner2D(Learner2D):
     max loss of the triangles.
     """
 
-    def __init__(self, function, bounds, weight=1, loss_per_triangle=None):
+    def __init__(self, function, bounds, average_priority=1, loss_per_triangle=None):
         super().__init__(function, bounds, loss_per_triangle)
         self._data = dict()  # {point: {seed: value}} mapping
         self.pending_points = dict()  # {point: {seed}}
@@ -56,7 +56,7 @@ class AverageLearner2D(Learner2D):
         # Adding a seed of 0 to the _stack to
         # make {((x, y), seed): loss_improvements, ...}.
         self._stack = {(p, 0): l for p, l in self._stack.items()}
-        self.weight = weight
+        self.average_priority = average_priority
         self.min_values_per_point = 3
         self._seed_stack = []  # [(point, nseeds, loss_improvement), ...]
 
@@ -103,9 +103,9 @@ class AverageLearner2D(Learner2D):
         xy, seed = self.unpack_point(xy_seed)
         return super().inside_bounds(xy)
 
-    def modify_point(self, point):
+    def _ensure_point(self, point):
         """Adding a point with seed = 0.
-        This used in '_fill_stack'."""
+        This used in '_fill_stack' in the Learner2D."""
         return (tuple(point), 0)
 
     def remove_unfinished(self):
@@ -128,19 +128,19 @@ class AverageLearner2D(Learner2D):
             Plot of the 'number of points' or 'std' per point.
         """
         assert which in ('n', 'std', 'standard_error', 'mean')
-        tmp_learner = Learner2D(lambda _: _, bounds=self.bounds)
-
+        tmp_learner = Learner2D(None, bounds=self.bounds)
         tmp_learner._data = {k: getattr(v, which) for k, v in self._data.items()}
         return tmp_learner.plot().relabel(which)
 
     def tell(self, point, value):
-        point = tuple(point)
+        point = tuple(point)  # ((x, y), seed) tuple
         point_exists = point[0] in self._data
         self._add_to_data(point, value)
         if not self.inside_bounds(point):
             return
         self._remove_from_to_pending(point)
         if not point_exists:
+            # we reset the interpolator cache
             self._ip = None
         self._stack.pop(point, None)
 
