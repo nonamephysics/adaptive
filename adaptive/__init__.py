@@ -10,7 +10,7 @@ from adaptive import runner
 from adaptive import utils
 
 from adaptive.learner import (
-	BaseLearner, Learner1D, Learner2D, LearnerND,
+    BaseLearner, Learner1D, Learner2D, LearnerND,
     AverageLearner, BalancingLearner, make_datasaver,
     DataSaver, IntegratorLearner, AverageLearner1D, AverageLearner2D
 )

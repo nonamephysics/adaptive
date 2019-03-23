@@ -12,12 +12,12 @@ from adaptive.learner.average_mixin import add_average_mixin, DataPoint
 
 @add_average_mixin
 class AverageLearner1D(Learner1D):
-    def __init__(self, function, bounds, loss_per_interval=None, weight=1):
+    def __init__(self, function, bounds, loss_per_interval=None, average_priority=1):
         super().__init__(function, bounds, loss_per_interval)
         self._data = dict()  # {point: {seed: value}} mapping
         self.pending_points = dict()  # {point: {seed}}
 
-        self.weight = weight
+        self.average_priority = average_priority
         self.min_values_per_point = 3
         self._seed_stack = []  # [(point, nseeds, loss_improvement), ...]
 
