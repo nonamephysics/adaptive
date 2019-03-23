@@ -287,8 +287,8 @@ def test_adding_existing_data_is_idempotent(learner_type, f, learner_kwargs):
 
 # XXX: This *should* pass (https://github.com/python-adaptive/adaptive/issues/55)
 #      but we xfail it now, as Learner2D will be deprecated anyway
-@run_with(Learner1D, AverageLearner1D, xfail(Learner2D), LearnerND,
-    AverageLearner, xfail(AverageLearner2D))
+@run_with(Learner1D, xfail(Learner2D), LearnerND,
+    AverageLearner)
 def test_adding_non_chosen_data(learner_type, f, learner_kwargs):
     """Adding data for a point that was not returned by 'ask'."""
     # XXX: learner, control and bounds are not defined
@@ -363,8 +363,8 @@ def test_point_adding_order_is_irrelevant(learner_type, f, learner_kwargs):
 
 # XXX: the Learner2D fails with ~50% chance
 # see https://github.com/python-adaptive/adaptive/issues/55
-@run_with(Learner1D, xfail(Learner2D), LearnerND, xfail(AverageLearner),
-    AverageLearner1D, xfail(AverageLearner2D))
+# XXX: the LearnerND previously not being tested and fails sometimes.
+@run_with(Learner1D, xfail(Learner2D), xfail(LearnerND), xfail(AverageLearner))
 def test_expected_loss_improvement_is_less_than_total_loss(learner_type, f, learner_kwargs):
     """The estimated loss improvement can never be greater than the total loss."""
     f = generate_random_parametrization(f)
@@ -385,6 +385,10 @@ def test_expected_loss_improvement_is_less_than_total_loss(learner_type, f, lear
         assert sum(loss_improvements) < sum(learner.losses.values())
     elif learner_type is AverageLearner:
         assert sum(loss_improvements) < learner.loss()
+    elif learner_type is LearnerND:
+        assert sum(loss_improvements) < sum(learner._losses.values())
+    else:
+        raise Exception('Nothing is being tested.')
 
 
 # XXX: This *should* pass (https://github.com/python-adaptive/adaptive/issues/55)
@@ -439,6 +443,7 @@ def test_learner_performance_is_invariant_under_scaling(learner_type, f, learner
 @run_with(Learner1D, Learner2D, LearnerND, AverageLearner,
     AverageLearner1D, AverageLearner2D,
     with_all_loss_functions=False)
+@pytest.mark.timeout(30)
 def test_balancing_learner(learner_type, f, learner_kwargs):
     """Test if the BalancingLearner works with the different types of learners."""
     learners = [learner_type(generate_random_parametrization(f), **learner_kwargs)
@@ -448,10 +453,10 @@ def test_balancing_learner(learner_type, f, learner_kwargs):
 
     # Emulate parallel execution
     stash = []
-    N = 100
+    N = 50
     for i in range(N):
-        n = random.randint(1, 10)
-        m = random.randint(0, n)
+        n = random.randint(2, 10)
+        m = random.randint(1, n)
         xs, _ = learner.ask(n, tell_pending=False)
 
         # Save 'm' random points out of `xs` for later
@@ -478,6 +483,7 @@ def test_balancing_learner(learner_type, f, learner_kwargs):
     AverageLearner1D, AverageLearner2D,
     maybe_skip(SKOptLearner), IntegratorLearner,
     with_all_loss_functions=False)
+@pytest.mark.timeout(30)
 def test_saving(learner_type, f, learner_kwargs):
     f = generate_random_parametrization(f)
     learner = learner_type(f, **learner_kwargs)
@@ -488,7 +494,7 @@ def test_saving(learner_type, f, learner_kwargs):
     elif learner_type in (AverageLearner1D, AverageLearner2D):
         learner.average_priority = 0.1
         control.average_priority = 0.1
-    simple(learner, lambda l: l.npoints > 100)
+    simple(learner, lambda l: l.npoints > 10)
     fd, path = tempfile.mkstemp()
     try:
         learner.save(path)
@@ -497,7 +503,7 @@ def test_saving(learner_type, f, learner_kwargs):
         np.testing.assert_almost_equal(learner.loss(), control.loss())
 
         # Try if the control is runnable
-        simple(control, lambda l: l.npoints > 200)
+        simple(control, lambda l: l.npoints > 20)
     finally:
         os.remove(path)
 
@@ -505,6 +511,7 @@ def test_saving(learner_type, f, learner_kwargs):
 @run_with(Learner1D, Learner2D, LearnerND, AverageLearner,
     maybe_skip(SKOptLearner), IntegratorLearner,
     with_all_loss_functions=False)
+@pytest.mark.timeout(30)
 def test_saving_of_balancing_learner(learner_type, f, learner_kwargs):
     f = generate_random_parametrization(f)
     learner = BalancingLearner([learner_type(f, **learner_kwargs)])
@@ -515,7 +522,7 @@ def test_saving_of_balancing_learner(learner_type, f, learner_kwargs):
             l._recompute_losses_factor = 1
             c._recompute_losses_factor = 1
 
-    simple(learner, lambda l: l.learners[0].npoints > 100)
+    simple(learner, lambda l: l.learners[0].npoints > 10)
     folder = tempfile.mkdtemp()
 
     def fname(learner):
@@ -528,7 +535,7 @@ def test_saving_of_balancing_learner(learner_type, f, learner_kwargs):
         np.testing.assert_almost_equal(learner.loss(), control.loss())
 
         # Try if the control is runnable
-        simple(control, lambda l: l.learners[0].npoints > 200)
+        simple(control, lambda l: l.learners[0].npoints > 20)
     finally:
         shutil.rmtree(folder)
 
@@ -536,6 +543,7 @@ def test_saving_of_balancing_learner(learner_type, f, learner_kwargs):
 @run_with(Learner1D, Learner2D, LearnerND, AverageLearner,
     maybe_skip(SKOptLearner), IntegratorLearner,
     with_all_loss_functions=False)
+@pytest.mark.timeout(30)
 def test_saving_with_datasaver(learner_type, f, learner_kwargs):
     f = generate_random_parametrization(f)
     g = lambda x: {'y': f(x), 't': random.random()}
