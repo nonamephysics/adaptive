@@ -14,6 +14,7 @@ dependencies:
     - ipyparallel
     - pandas  # until https://github.com/ioam/holoviews/issues/3430 is fixed
     - distributed
+    - matplotlib
     - ipywidgets
     - scikit-optimize
     - git+https://github.com/basnijholt/jupyter-sphinx.git@widgets_execute
