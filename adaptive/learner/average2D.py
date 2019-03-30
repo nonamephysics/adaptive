@@ -32,10 +32,10 @@ class AverageLearner2D(Learner2D):
 
     Attributes
     ----------
-    min_values_per_point : int, default 3
+    min_seeds_per_point : int, default 3
         Minimum amount of values per point. This means that the
         standard error of a point is infinity until there are
-        'min_values_per_point' for a point.
+        'min_seeds_per_point' for a point.
 
     Methods
     -------
@@ -57,7 +57,7 @@ class AverageLearner2D(Learner2D):
         # make {((x, y), seed): loss_improvements, ...}.
         self._stack = {(p, 0): l for p, l in self._stack.items()}
         self.average_priority = average_priority
-        self.min_values_per_point = 3
+        self.min_seeds_per_point = 3
         self._seed_stack = []  # [(point, nseeds, loss_improvement), ...]
 
     def unpack_point(self, point):

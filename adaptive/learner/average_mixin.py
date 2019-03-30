@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from collections.abc import Mapping
+from collections import defaultdict
 from math import sqrt
 import sys
 
@@ -29,20 +30,29 @@ class AverageMixin:
         return {k: v.standard_error if v.n >= self.min_values_per_point else inf
             for k, v in self._data.items()}
 
-    def mean_values_per_point(self):
+    def mean_seeds_per_point(self):
         return np.mean([x.n for x in self._data.values()])
 
-    def _next_seed(self, point, exclude=None):
+    def _next_seeds(self, point, nseeds, exclude=None):
         exclude = set(exclude) if exclude is not None else set()
         done_seeds = self._data.get(point, {}).keys()
         pending_seeds = self.pending_points.get(point, set())
-        seed = len(done_seeds) + len(pending_seeds) + len(exclude)
-        if any(seed in x for x in [done_seeds, pending_seeds, exclude]):
-            # Means that the seed already exists, for example
-            # when 'done_seeds[point] | pending_seeds [point] == {0, 2}'.
-            # Only happens when starting the learner after cancelling/loading.
-            return (set(range(seed)) - pending_seeds - done_seeds - exclude).pop()
-        return seed
+        seeds = []
+        for i in range(nseeds):
+            seed = len(done_seeds) + len(pending_seeds) + len(exclude)
+            if any(seed in x for x in [done_seeds, pending_seeds, exclude]):
+                # Means that the seed already exists, for example
+                # when 'done_seeds[point] | pending_seeds [point] == {0, 2}'.
+                # Only happens when starting the learner after cancelling/loading.
+                return list(
+                    set(range(seed + nseeds - i))
+                    - pending_seeds
+                    - done_seeds
+                    - exclude
+                )[:nseeds]
+            seeds.append(seed)
+            exclude.add(seed)
+        return seeds
 
     def _add_to_pending(self, point):
         x, seed = self.unpack_point(point)
@@ -70,24 +80,28 @@ class AverageMixin:
 
         # Take from the _seed_stack.
         self._fill_seed_stack(till=n)
-        for i in range(n):
-            exclude_seeds = set()
-            point, nseeds, loss_improvement = self._seed_stack[i]
-            for j in range(nseeds):
-                seed = self._next_seed(point, exclude_seeds)
-                exclude_seeds.add(seed)
-                points.append((point, seed))
-                loss_improvements.append(loss_improvement / nseeds)
-                if len(points) == n:
-                    break
-            if len(points) == n:
+        points = defaultdict(set)
+        loss_improvements = {}
+        remaining = n
+        for i, (point, nseeds, loss_improvement) in enumerate(self._seed_stack):
+            nseeds_to_choose = min(nseeds, remaining)
+            seeds = self._next_seeds(point, nseeds_to_choose, exclude=points[point])
+            for seed in seeds:
+                points[point].add(seed)
+                loss_improvements[(point, seed)] = loss_improvement / nseeds
+            remaining -= nseeds_to_choose
+            if not remaining:
                 break
 
-        # Remove the chosen points from the _seed_stack.
+        points = [(point, seed) for point, seeds in points.items()
+                  for seed in seeds]
+        loss_improvements = [loss_improvements[point] for point in points]
+
         if tell_pending:
+            # Remove the chosen points from the _seed_stack.
             for p in points:
                 self.tell_pending(p)
-            nseeds_left = nseeds - j - 1  # of self._seed_stack[i]
+            nseeds_left = nseeds - nseeds_to_choose  # of self._seed_stack[i]
             if nseeds_left > 0:  # not all seeds have been asked
                 point, nseeds, loss_improvement = self._seed_stack[i]
                 self._seed_stack[i] = (
@@ -102,37 +116,24 @@ class AverageMixin:
 
     def _fill_seed_stack(self, till):
         n = till - sum(nseeds for (_, nseeds, _) in self._seed_stack)
-        if n < 1:
+        if n <= 0:
             return
 
-        new_points, new_points_losses = self._new_points(n)
-        existing_points, existing_points_losses = self._existing_points()
+        new_points, new_points_losses = self._interval_losses(n)
+        existing_points, existing_points_losses = self._point_losses()
 
         points = new_points + existing_points
         loss_improvements = new_points_losses + existing_points_losses
 
         loss_improvements, points = zip(*sorted(
-            zip(loss_improvements, points), reverse=True))
-
-        # A mapping to check if a point already exists in the _seed_stack
-        mapping = {point: i for i, (point, *_) in enumerate(self._seed_stack)}
+            zip(loss_improvements, points), reverse=True))  # ANTON: sort by (loss_improvement / nseeds)
 
         # Add points to the _seed_stack, it can happen that its
         # length exceeds the number of requested points.
         n_left = n
         for loss_improvement, (point, nseeds) in zip(
-            loss_improvements, points):
-            tup = (point, nseeds, loss_improvement)
-            if point in mapping:  # point is inside _seed_stack
-                # Combine the tuple with the same points existing in the
-                # _seed_stack with the newly suggested
-                # (nseeds, loss_improvements) pair.
-                i = mapping[point]
-                tup_old = self._seed_stack[i]
-                sum_ = [sum(x) for x in zip(tup[1:], tup_old[1:])]
-                self._seed_stack[i] = (point, *sum_)
-            else:
-                self._seed_stack.append(tup)
+                loss_improvements, points):
+            self._seed_stack.append((point, nseeds, loss_improvement))
             n_left -= nseeds
             if n_left <= 0:
                 break
@@ -142,33 +143,33 @@ class AverageMixin:
         pending_points = self.pending_points.get(point, [])
         return len(self._data[point]) + len(pending_points)
 
-    def _mean_values_per_neighbor(self, neighbors):
+    def _mean_seeds_per_neighbor(self, neighbors):
         """The average number of neighbors of a 'point'."""
         return {p: sum(self.n_values(n) for n in ns) / len(ns)
             for p, ns in neighbors.items()}
 
-    def _new_points(self, n):
+    def _interval_losses(self, n):
         """Add new points with at least self.min_values_per_point points
         or with as many points as the neighbors have on average."""
         points, loss_improvements = self._ask_points_without_adding(n)
-        if len(self._data) < 4:
+        if len(self._data) < 4:  # ANTON: fix (4) to bounds
             points = [(p, self.min_values_per_point) for p, s in points]
             return points, loss_improvements
 
         only_points = [p for p, s in points]  # points are [(x, seed), ...]
         neighbors = self._get_neighbor_mapping_new_points(only_points)
-        mean_values_per_neighbor = self._mean_values_per_neighbor(neighbors)
+        mean_seeds_per_neighbor = self._mean_seeds_per_neighbor(neighbors)
 
         points = []
         for p in only_points:
-            n_neighbors = int(mean_values_per_neighbor[p])
+            n_neighbors = int(mean_seeds_per_neighbor[p])
             nseeds = max(n_neighbors, self.min_values_per_point)
             points.append((p, nseeds))
 
         return points, loss_improvements
 
-    def _existing_points(self, fraction=0.1):
-        """Increase the number of seeds by 10%."""
+    def _point_losses(self, fraction=1):
+        """Double the number of seeds."""
         if len(self.data) < 4:
             return [], []
         scale = self.value_scale()
@@ -176,14 +177,14 @@ class AverageMixin:
         loss_improvements = []
 
         neighbors = self._get_neighbor_mapping_existing_points()
-        mean_values_per_neighbor = self._mean_values_per_neighbor(neighbors)
+        mean_seeds_per_neighbor = self._mean_seeds_per_neighbor(neighbors)
 
         for p, sem in self.data_sem.items():
             N = self.n_values(p)
-            n_more = int(fraction * N)  # increase the amount of points by 10%
+            n_more = int(fraction * N)  # double the amount of points
             n_more = max(n_more, 1)  # at least 1 point
             points.append((p, n_more))
-            needs_more_data = mean_values_per_neighbor[p] > 1.5 * N
+            needs_more_data = mean_seeds_per_neighbor[p] > 1.5 * N
             if needs_more_data:
                 loss_improvement = inf
             else:

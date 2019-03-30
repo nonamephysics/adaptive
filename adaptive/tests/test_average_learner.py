@@ -54,11 +54,11 @@ def test_avg_std_and_npoints():
 
 def test_2d_return_bounds():
     learner = AverageLearner2D(lambda x: x[0], bounds=[(-1, 1), (-1, 1)])
-    learner.min_values_per_point = 10
+    learner.min_seeds_per_point = 10
     nbounds = 4  # a Learner2D has 4 bounds
-    points, _ = learner.ask(nbounds * learner.min_values_per_point)
+    points, _ = learner.ask(nbounds * learner.min_seeds_per_point)
     ps = defaultdict(list)
     for x, seed in points:
         ps[x].append(seed)
     assert all(p in learner._bounds_points for p in ps.keys())
-    all(len(seeds) == learner.min_values_per_point for seeds in ps.values())
+    all(len(seeds) == learner.min_seeds_per_point for seeds in ps.values())
