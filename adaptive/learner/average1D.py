@@ -37,6 +37,17 @@ class AverageLearner1D(Learner1D):
         return {k: [x for x in v if x is not None]
             for k, v in self.neighbors.items()}
 
+    def loss_per_point(self):
+        loss_per_point = {}
+        for p in self.data.keys():
+            losses = []
+            for neighbor in self.neighbors[p]:
+                if neighbor is not None:
+                    ival = tuple(sorted((p, neighbor)))
+                    losses.append(self.losses[ival])
+            loss_per_point[p] = sum(losses) / len(losses)
+        return loss_per_point
+
     def unpack_point(self, x_seed):
         return x_seed
 

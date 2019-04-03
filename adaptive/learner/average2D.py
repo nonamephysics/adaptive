@@ -103,6 +103,17 @@ class AverageLearner2D(Learner2D):
         xy, seed = self.unpack_point(xy_seed)
         return super().inside_bounds(xy)
 
+    def loss_per_point(self):
+        ip = self.ip()
+        losses = self.loss_per_triangle(ip)
+        loss_per_point = defaultdict(list)
+        points = list(self.data.keys())
+        for simplex, loss in zip(ip.tri.vertices, losses):
+            for i in simplex:
+                loss_per_point[points[i]].append(loss)
+        loss_per_point = {p: sum(losses) / len(losses) for p, losses in loss_per_point.items()}
+        return loss_per_point
+
     def _ensure_point(self, point):
         """Adding a point with seed = 0.
         This used in '_fill_stack' in the Learner2D."""
