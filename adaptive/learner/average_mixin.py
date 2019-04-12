@@ -120,23 +120,8 @@ class AverageMixin:
         if n <= 0:
             return
 
-        new_points, new_interval_losses, interval_neighbors = self._interval_losses(n)
-        existing_points, existing_points_sem_losses, point_neighbors = self._point_losses()
-        assert not interval_neighbors.keys() & point_neighbors.keys()
-
-        neighbors = {**interval_neighbors, **point_neighbors}
-
-        def normalize(points, losses, other_losses):
-            for i, ((point, _), loss_improvement) in enumerate(zip(points, losses)):
-                loss_other = sum(other_losses[p] for p in neighbors[point]) / len(neighbors[point])
-                normalized_loss = loss_improvement + sqrt(loss_improvement * loss_other)
-                losses[i] = min(normalized_loss, inf)
-
-        if neighbors:
-            sem_losses = self.data_sem
-            interval_losses = self.loss_per_point()
-            normalize(new_points, new_interval_losses, sem_losses)
-            normalize(existing_points, existing_points_sem_losses, interval_losses)
+        new_points, new_interval_losses = self._interval_losses(n)
+        existing_points, existing_points_sem_losses = self._point_losses()
 
         points = new_points + existing_points
         loss_improvements = new_interval_losses + existing_points_sem_losses
@@ -172,7 +157,7 @@ class AverageMixin:
         points, loss_improvements = self._ask_points_without_adding(n)
         if len(self._data) < 4:  # ANTON: fix (4) to bounds
             points = [(p, self.min_seeds_per_point) for p, s in points]
-            return points, loss_improvements, {}
+            return points, loss_improvements
 
         only_points = [p for p, s in points]  # points are [(x, seed), ...]
         neighbors = self._get_neighbor_mapping_new_points(only_points)
@@ -184,12 +169,12 @@ class AverageMixin:
             nseeds = max(n_neighbors, self.min_seeds_per_point)
             points.append((p, nseeds))
 
-        return points, loss_improvements, neighbors
+        return points, loss_improvements
 
     def _point_losses(self, fraction=1):
-        """Double the number of seeds."""
+        """Increase the number of seeds by 'fraction'."""
         if len(self.data) < 4:
-            return [], [], {}
+            return [], []
         scale = self.value_scale()
         points = []
         loss_improvements = []
@@ -197,9 +182,12 @@ class AverageMixin:
         neighbors = self._get_neighbor_mapping_existing_points()
         mean_seeds_per_neighbor = self._mean_seeds_per_neighbor(neighbors)
 
+        npoints_factor = np.log2(self.npoints)
+
         for p, sem in self.data_sem.items():
             N = self.n_values(p)
-            n_more = self.n_values(p)  # double the amount of points
+            n_more = int(fraction * N)  # increase the amount of points by fraction
+            n_more = max(n_more, 1)  # at least 1 point
             points.append((p, n_more))
             needs_more_data = mean_seeds_per_neighbor[p] > 1.5 * N
             if needs_more_data:
@@ -211,8 +199,10 @@ class AverageMixin:
                 # We scale the values, sem(ys) / scale == sem(ys / scale).
                 # and multiply them by a weight average_priority.
                 loss_improvement = self.average_priority * sem_improvement / scale
+                if loss_improvement < inf:
+                    loss_improvement *= npoints_factor
             loss_improvements.append(loss_improvement)
-        return points, loss_improvements, neighbors
+        return points, loss_improvements
 
     def _get_data(self):
         # change DataPoint -> dict for saving
