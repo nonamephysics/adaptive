@@ -75,20 +75,29 @@ class AverageLearner1D(Learner1D):
         self.neighbors_combined = deepcopy(self.neighbors)
 
     def plot(self, *, with_sem=True):
-        scatter = super().plot()
-        if not with_sem:
-            return scatter
+        hv = ensure_holoviews()
 
-        if self._data:
-            hv = ensure_holoviews()
-            xs, ys = zip(*sorted(self.data.items()))
-            sem = self.data_sem
-            err = [sem[x] if sem[x] < sys.float_info.max
-                   else np.nan for x in xs]
-            spread = hv.Spread((xs, ys, err))
-            return scatter * spread
+        if not self._data:
+            return hv.Scatter([])
+
+        xs, ys = zip(*sorted(self.data.items()))
+        get = lambda attr: [getattr(self._data[x], attr) for x in xs]
+        sems = get('standard_error')
+        stds = get('std')
+        Ns = get('n')
+
+        scatter = hv.Scatter(
+            (xs, ys, stds, sems, Ns),
+            vdims=['mean', 'std', 'standard_error', 'n']
+        )
+
+        if not with_sem:
+            plot = scatter.opts(plot=dict(tools=['hover']))
         else:
-            return scatter
+            err = [x if x < sys.float_info.max else np.nan for x in sems]
+            spread = hv.Spread((xs, ys, err))
+            plot = (scatter * spread)
+        return plot.opts(hv.opts.Scatter(tools=['hover']))
 
     def _set_data(self, data):
         # change dict -> DataPoint, because the points are saved using dicts
